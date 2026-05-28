@@ -278,11 +278,15 @@ dependencies = [
 [[package]]
 name = "gdl-cli"
 version = "0.1.0"
+dependencies = [
+ "gdl-testkit",
+]
 
 [[package]]
 name = "gdl-core"
 version = "0.1.0"
 dependencies = [
+ "gdl-testkit",
  "gix",
  "tempfile",
 ]
@@ -290,10 +294,16 @@ dependencies = [
 [[package]]
 name = "gdl-format"
 version = "0.1.0"
+dependencies = [
+ "gdl-testkit",
+]
 
 [[package]]
 name = "gdl-mcp"
 version = "0.1.0"
+dependencies = [
+ "gdl-testkit",
+]
 
 [[package]]
 name = "gdl-testkit"

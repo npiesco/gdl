@@ -10,3 +10,6 @@ description = "Pure rendering helpers for gdl (status/diff to_string in Plain/Js
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+gdl-testkit = { path = "../gdl-testkit" }
