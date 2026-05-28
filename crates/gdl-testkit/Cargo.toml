@@ -1,0 +1,13 @@
+[package]
+name = "gdl-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "Dev-only fixture builders shared across gdl integration tests"
+
+[lints]
+workspace = true

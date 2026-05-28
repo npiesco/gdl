@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/gdl-core",
+    "crates/gdl-format",
+    "crates/gdl-cli",
+    "crates/gdl-mcp",
+    "crates/gdl-testkit",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/npiesco/gdl"
+authors = ["npiesco"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
