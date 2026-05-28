@@ -11,3 +11,6 @@ description = "Dev-only fixture builders shared across gdl integration tests"
 
 [lints]
 workspace = true
+
+[dependencies]
+tempfile = "3.27.0"

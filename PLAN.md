@@ -186,7 +186,7 @@ All three sibling repos are at `~/` on this machine. Every line cited below is r
 
 | What we leverage | Source | What we keep / what we change |
 |---|---|---|
-| `gix-diff` 0.63 with `blob` + `sha1` features as the diff backbone | `~/kagmus/crates/ws-diff/Cargo.toml:14` (`gix-diff = { version = "0.63", default-features = false, features = ["blob", "sha1"] }`) | **Keep verbatim.** Same crate, same features, same version. |
+| `gix-diff` recipe as the diff backbone | `~/kagmus/crates/ws-diff/Cargo.toml:14` and `~/kagmus/crates/ws-diff/src/hunks.rs:8-11, 21-26` | **Reuse the public API shape, not the version pin.** Add via `cargo add` only; Cargo resolves the compatible version for this workspace's `rust-version`. |
 | `byte_lines` + `InternedInput` + `Algorithm::Histogram` + `diff_with_slider_heuristics` recipe | `~/kagmus/crates/ws-diff/src/hunks.rs:8-11, 21-26, in compute_hunks()` | **Keep verbatim.** This is the gix-diff idiomatic recipe for line-granular hunks with CRLF/non-UTF-8 round-trip. We pull just `hunks.rs::compute_hunks` shape — drop `Hunk` (which carries kagmus-specific `DiffEntryId`/`HunkId`) and replace with our own `Hunk` struct typed for rendering (old_start, old_lines, new_start, new_lines, old_bytes, new_bytes). |
 | `ChangeType` enum shape | `~/kagmus/crates/ws-core/src/diff.rs:36-45` (`Created`, `Modified`, `MetadataOnly`, `Deleted`, `DirReplaced`, `Renamed`) | **Reshape.** kagmus models overlay-fs change types. We map to git's natural ones: `Modified`, `Added`, `Deleted`, `Renamed`, `Copied`, `Untracked`, `Conflicted`, `TypeChanged`. Same Display/FromStr pattern (lines 47-74). |
 | `classify_entry(rel_path, lower)` pattern | `~/kagmus/crates/ws-core/src/diff.rs` + `~/kagmus/crates/ws-diff/src/classify.rs:8-13` | **Replace.** kagmus classifies by "does lower-dir contain the path"; git classifies by index/worktree status (which `gix::status` already gives us). We will call `gix::status()` and translate, not roll our own tree walk. |
@@ -229,7 +229,7 @@ All three sibling repos are at `~/` on this machine. Every line cited below is r
 ### 3.5 Reuse policy — design reference, not source copy
 
 Sibling source repos are AGPL-3.0-only (`~/sessql/Cargo.toml`, `~/kagmus/Cargo.toml`). `gdl` ships under MIT (see §10). The "Keep verbatim" wording elsewhere in this plan means **"reproduce the API shape, call pattern, and feature pinning verbatim from a design-reference reading of those files"**, NOT "paste source lines into gdl". Specifically:
-- The `gix-diff` feature set, version pin, and call sequence (`byte_lines` + `InternedInput` + `Algorithm::Histogram` + `diff_with_slider_heuristics`) are an idiomatic recipe published in the public `gix-diff` docs. Using it is not copying kagmus.
+- The `gix-diff` call sequence (`byte_lines` + `InternedInput` + `Algorithm::Histogram` + `diff_with_slider_heuristics`) is an idiomatic recipe published in the public `gix-diff` docs. Using it is not copying kagmus, and dependency versions are resolved through `cargo add`, not manually pinned.
 - The `*_to_string` + MCP wrapper *pattern* is a structural design choice. Reimplemented from scratch in `gdl`, not lifted.
 - `crossterm` and `syntect` idioms (`SetForegroundColor`, `HighlightLines`, `as_24_bit_terminal_escaped`) are documented usage from those crates' own docs, not PilotOS-specific code.
 
@@ -418,8 +418,8 @@ Pins **verified against the actual sibling repos** (`~/sessql/Cargo.toml`, `~/ka
 
 | Dep | Version | Verified source / justification |
 |---|---|---|
-| `gix` | `0.73.0` | Resolved by `cargo add gix --package gdl-core` under `rust-version = 1.75`; Cargo ignored current `gix 0.84.0` because it requires rustc 1.85. kagmus uses individual `gix-*` component crates rather than a top-level `gix`; gdl wants the umbrella crate for `open`/`status`. |
-| `gix-diff` | `0.63` features = `["blob", "sha1"]` | Verified `~/kagmus/crates/ws-diff/Cargo.toml:14`. |
+| `gix` | Cargo-resolved via `cargo add gix --package gdl-core` | Workspace MSRV is `rust-version = 1.91`, matching the installed stable toolchain. Cargo currently resolves `0.84.0`. kagmus uses individual `gix-*` component crates rather than a top-level `gix`; gdl wants the umbrella crate for `open`/`status`. |
+| `gix-diff` | Cargo-resolved via `cargo add gix-diff --package gdl-core` | Use the same public API recipe as kagmus, but do not request a version in the `cargo add` command. Workspace MSRV is `rust-version = 1.91`; Cargo currently resolves `0.64.0`. |
 | `crossterm` | `0.29.0` | Verified `~/PilotOS/pilot-os/src-tauri/Cargo.toml:40`. |
 | `syntect` | `5.3.0` | Verified `~/PilotOS/pilot-os/src-tauri/Cargo.toml:42`. Provides `as_24_bit_terminal_escaped`. |
 | `strip-ansi-escapes` | latest | Required for Feature 6a/11a oracle. |
