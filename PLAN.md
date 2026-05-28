@@ -316,12 +316,13 @@ Numbered features below are the **Red test** of each loop. After each feature's 
 ### Feature 2 — `gdl_core::open(path)` opens a real git repo
 - **Red**: `crates/gdl-core/tests/open_real_repo.rs`:
   - `let tmp = tempfile::tempdir()?;`
-  - `gix::init(tmp.path())?;` (real on-disk repo)
+  - `git init` via `std::process::Command` (real on-disk repo; no stub or source-grep)
   - `let repo = gdl_core::open(tmp.path())?;`
-  - `assert!(repo.path().ends_with(".git"));`
+  - `assert_eq!(repo.worktree_dir(), tmp.path());`
+  - `assert_eq!(repo.git_dir(), tmp.path().join(".git"));`
   - Asserts `gdl_core::open("/nonexistent")` returns the expected typed error variant (matched on, not stringly-compared).
   - Asserts `gdl_core::open(<subdir of repo>)` discovers upward to the repo root (`gix::discover` fallback).
-- **Green**: thin wrapper over `gix::ThreadSafeRepository::open` with `gix::discover` fallback + typed error enum.
+- **Green**: thin wrapper over `gix::open` with `gix::discover` fallback, a small gdl-owned `Repository` wrapper exposing `git_dir()` / `worktree_dir()`, and a typed `OpenError`.
 
 ### Feature 3 — `gdl_core::status(&repo)` returns `Vec<GdlEntry>` with `ChangeSection`
 - **Red**: `crates/gdl-core/tests/status_real_repo.rs`, plus `status_conflicted.rs`, `status_binary.rs`, `rename_detection.rs`. Each uses `gdl_testkit::make_status_fixture(...)` to build a real on-disk repo and exercises one cross-section of the §2.3 count rules:
@@ -417,7 +418,7 @@ Pins **verified against the actual sibling repos** (`~/sessql/Cargo.toml`, `~/ka
 
 | Dep | Version | Verified source / justification |
 |---|---|---|
-| `gix` | `0.66` (initial; verify compatibility post-bootstrap) | kagmus uses individual `gix-*` component crates rather than a top-level `gix`; gdl wants the umbrella crate for `open`/`status`. Adjust if `cargo tree -d` shows conflicts with `gix-diff 0.63`. |
+| `gix` | `0.73.0` | Resolved by `cargo add gix --package gdl-core` under `rust-version = 1.75`; Cargo ignored current `gix 0.84.0` because it requires rustc 1.85. kagmus uses individual `gix-*` component crates rather than a top-level `gix`; gdl wants the umbrella crate for `open`/`status`. |
 | `gix-diff` | `0.63` features = `["blob", "sha1"]` | Verified `~/kagmus/crates/ws-diff/Cargo.toml:14`. |
 | `crossterm` | `0.29.0` | Verified `~/PilotOS/pilot-os/src-tauri/Cargo.toml:40`. |
 | `syntect` | `5.3.0` | Verified `~/PilotOS/pilot-os/src-tauri/Cargo.toml:42`. Provides `as_24_bit_terminal_escaped`. |
