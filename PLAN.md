@@ -228,7 +228,7 @@ All three sibling repos are at `~/` on this machine. Every line cited below is r
 
 ### 3.5 Reuse policy — design reference, not source copy
 
-Sibling source repos are AGPL-3.0-only (`~/sessql/Cargo.toml`, `~/kagmus/Cargo.toml`). `gdl` ships under MIT (see §10). The "Keep verbatim" wording elsewhere in this plan means **"reproduce the API shape, call pattern, and feature pinning verbatim from a design-reference reading of those files"**, NOT "paste source lines into gdl". Specifically:
+Sibling source repos are AGPL-3.0-only (`~/sessql/Cargo.toml`, `~/kagmus/Cargo.toml`). `gdl` ships under AGPL-3.0-only (see §10). The "Keep verbatim" wording elsewhere in this plan means **"reproduce the API shape, call pattern, and feature pinning verbatim from a design-reference reading of those files"**, NOT "paste source lines into gdl". Specifically:
 - The `gix-diff` call sequence (`byte_lines` + `InternedInput` + `Algorithm::Histogram` + `diff_with_slider_heuristics`) is an idiomatic recipe published in the public `gix-diff` docs. Using it is not copying kagmus, and dependency versions are resolved through `cargo add`, not manually pinned.
 - The `*_to_string` + MCP wrapper *pattern* is a structural design choice. Reimplemented from scratch in `gdl`, not lifted.
 - `crossterm` and `syntect` idioms (`SetForegroundColor`, `HighlightLines`, `as_24_bit_terminal_escaped`) are documented usage from those crates' own docs, not PilotOS-specific code.
@@ -244,7 +244,7 @@ When this plan says "Keep verbatim shape", read it as "reproduce the structure i
 ├── Cargo.toml                       # [workspace] members = ["crates/*"]
 ├── PLAN.md                          # this file
 ├── README.md                        # written in the final phase
-├── LICENSE                          # MIT (see §10)
+├── LICENSE                          # AGPL-3.0-only (see §10)
 ├── .gitignore                       # /target, *.swp, .DS_Store
 └── crates/
     ├── gdl-core/                    # gix-based engine: open repo, status, hunks
@@ -405,7 +405,7 @@ Numbered features below are the **Red test** of each loop. After each feature's 
 
 ### Feature 14 — README + LICENSE + release builds + dogfood smoke
 - README documents install (`cargo install --path crates/gdl-cli`), each subcommand, every flag with its resolution rule (§2.2), the `--repo` flag, the DRY claim with a `gdl-format` excerpt, MCP client config snippet (rmcp stdio), and a "use it on yourself" quickstart: `gdl --repo ~/gdl status`.
-- `LICENSE` = MIT (see §10).
+- `LICENSE` = AGPL-3.0-only (see §10).
 - `make release` produces `target/release/gdl` and `target/release/gdl-mcp`.
 - Final dogfood smoke: `./target/release/gdl --repo $PWD status` runs against `~/gdl` itself, exits 0, non-empty output. Same for `./target/release/gdl --repo $PWD diff PLAN.md --area worktree`.
 - Final `cargo test --workspace --release` (includes every fixture and every dogfood byte-equality test).
@@ -477,9 +477,9 @@ The SQL `todos` table tracks per-feature execution status (`pending` → `in_pro
 
 ## 10. License and reuse policy
 
-**License:** MIT, in `LICENSE` at repo root. Chosen so `gdl` is freely reusable as a CLI binary or as a Rust library by other tools (including those that don't want AGPL).
+**License:** AGPL-3.0-only, in `LICENSE` at repo root. This aligns `gdl` with the local sibling tool style (`codino`, `sessql`, `fsgdb`) and the AGPL design-reference repos already used during planning.
 
-**Reuse policy (clarifies "Keep verbatim" wording elsewhere in this plan):** sibling repos are AGPL-3.0-only (`~/sessql/Cargo.toml:14`, `~/kagmus/Cargo.toml:8`). We do NOT copy AGPL source into the MIT-licensed gdl tree. What we DO reuse:
+**Reuse policy (clarifies "Keep verbatim" wording elsewhere in this plan):** sibling repos are AGPL-3.0-only (`~/sessql/Cargo.toml:14`, `~/kagmus/Cargo.toml:8`). Even though `gdl` is AGPL-3.0-only, we still avoid copying sibling source directly unless the plan explicitly calls it out. What we DO reuse:
 
 1. **Public-API call patterns** of third-party crates — e.g. the `gix-diff` recipe (`byte_lines` + `InternedInput` + `Algorithm::Histogram` + `diff_with_slider_heuristics`), `crossterm`'s `SetForegroundColor`, `syntect`'s `HighlightLines` + `as_24_bit_terminal_escaped`. These are documented in those crates' own docs; reading kagmus or PilotOS is faster than rediscovering them, but we're using the crate APIs, not copying repo code.
 2. **Structural design patterns** — e.g. sessql's "one `*_to_string` helper per operation, MCP tool body is a one-line wrapper" pattern. The pattern itself is a design choice, not copyrightable. We reimplement it in our own crate structure.
@@ -487,4 +487,4 @@ The SQL `todos` table tracks per-feature execution status (`pending` → `in_pro
 
 When this plan says "Keep verbatim", read it as **"reproduce the structure independently to match the pin/API shape"**. No source files are copied across repos.
 
-If `gdl` ever needs to lift actual code (e.g. a non-trivial parsing helper) from a sibling AGPL repo, this plan must be updated first to either (a) relicense gdl, or (b) carve that helper into a separately-licensed dep.
+If `gdl` ever needs to lift actual code (e.g. a non-trivial parsing helper) from a sibling AGPL repo, this plan must be updated first to identify the source file, preserve notices, and verify license compatibility.
