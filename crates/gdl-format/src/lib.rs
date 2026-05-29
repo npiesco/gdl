@@ -31,6 +31,8 @@ pub enum ColorPolicy {
 pub enum StatusView {
     /// Render all status sections.
     Full,
+    /// Render only repository-relative paths, one per line.
+    PathsOnly,
 }
 
 /// Rendering options shared by status renderers.
@@ -105,6 +107,10 @@ pub fn status_to_string(repo: &Repository, options: &RenderOptions) -> Result<St
             Ok(render_ansi_status(&entries))
         }
         (OutputFormat::Json, _, StatusView::Full) => render_json_status(entries),
+        (OutputFormat::Plain | OutputFormat::Ansi, _, StatusView::PathsOnly) => {
+            Ok(render_paths_only_status(&entries))
+        }
+        (OutputFormat::Json, _, StatusView::PathsOnly) => render_json_paths_only_status(&entries),
     }
 }
 
@@ -122,6 +128,25 @@ fn render_plain_status(entries: &[GdlEntry]) -> String {
 
 fn render_ansi_status(entries: &[GdlEntry]) -> String {
     render_status(entries, Some(&ColorTheme::default()))
+}
+
+fn render_paths_only_status(entries: &[GdlEntry]) -> String {
+    let mut output = String::new();
+
+    for entry in entries {
+        output.push_str(&slash_path(&entry.path));
+        output.push('\n');
+    }
+
+    output
+}
+
+fn render_json_paths_only_status(entries: &[GdlEntry]) -> Result<String, String> {
+    let paths = entries
+        .iter()
+        .map(|entry| slash_path(&entry.path))
+        .collect::<Vec<_>>();
+    serde_json::to_string_pretty(&paths).map_err(|err| err.to_string())
 }
 
 fn render_status(entries: &[GdlEntry], theme: Option<&ColorTheme>) -> String {
