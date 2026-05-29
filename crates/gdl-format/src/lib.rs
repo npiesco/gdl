@@ -1,10 +1,16 @@
 //! gdl-format: pure rendering helpers (status/diff `*_to_string`).
 
-use std::path::Path;
+use std::{path::Path, sync::OnceLock};
 
 use crossterm::style::{Color, ResetColor, SetForegroundColor};
-use gdl_core::{ChangeKind, ChangeSection, GdlEntry, Repository};
+use gdl_core::{ChangeKind, ChangeSection, DiffArea, FileDiff, GdlEntry, Hunk, Repository};
 use serde::{Deserialize, Serialize};
+use syntect::{
+    easy::HighlightLines,
+    highlighting::{Theme, ThemeSet},
+    parsing::SyntaxSet,
+    util::as_24_bit_terminal_escaped,
+};
 
 /// Output encoding for format renderers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +99,23 @@ pub struct StatusOutput {
     pub entries: Vec<GdlEntry>,
 }
 
+/// Stable top-level JSON shape for diff output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiffOutput {
+    /// Schema version, tied to the `gdl-core` package version.
+    pub version: String,
+    /// Repository-relative file path.
+    pub file: String,
+    /// Diff area requested by the caller.
+    pub area: DiffArea,
+    /// Target terminal width propagated for deterministic round trips.
+    pub width: usize,
+    /// Whether either side is binary. Binary files never expose text hunks.
+    pub binary: bool,
+    /// Raw byte-preserving hunks.
+    pub hunks: Vec<Hunk>,
+}
+
 /// Renders repository status as a deterministic string.
 pub fn status_to_string(repo: &Repository, options: &RenderOptions) -> Result<String, String> {
     let _width = options.width;
@@ -114,12 +137,49 @@ pub fn status_to_string(repo: &Repository, options: &RenderOptions) -> Result<St
     }
 }
 
+/// Renders a repository file diff as a deterministic string.
+pub fn diff_to_string(
+    repo: &Repository,
+    path: impl AsRef<Path>,
+    options: &RenderOptions,
+    area: DiffArea,
+) -> Result<String, String> {
+    let diff = gdl_core::diff(repo, path, area).map_err(|err| err.to_string())?;
+    match (options.format, options.color) {
+        (OutputFormat::Json, _) => render_json_diff(&diff, options.width),
+        (OutputFormat::Plain, _) | (OutputFormat::Ansi, ColorPolicy::Never) => {
+            Ok(render_plain_diff(&diff, options.width))
+        }
+        (OutputFormat::Ansi, ColorPolicy::Always) => Ok(render_ansi_diff(&diff, options.width)),
+    }
+}
+
 fn render_json_status(entries: Vec<GdlEntry>) -> Result<String, String> {
     let output = StatusOutput {
         version: gdl_core::version().to_owned(),
         entries,
     };
     serde_json::to_string_pretty(&output).map_err(|err| err.to_string())
+}
+
+fn render_json_diff(diff: &FileDiff, width: usize) -> Result<String, String> {
+    let output = DiffOutput {
+        version: gdl_core::version().to_owned(),
+        file: slash_path(&diff.file),
+        area: diff.area,
+        width,
+        binary: diff.binary,
+        hunks: diff.hunks.clone(),
+    };
+    serde_json::to_string_pretty(&output).map_err(|err| err.to_string())
+}
+
+fn render_plain_diff(diff: &FileDiff, width: usize) -> String {
+    render_diff(diff, width, None)
+}
+
+fn render_ansi_diff(diff: &FileDiff, width: usize) -> String {
+    render_diff(diff, width, Some(&ColorTheme::default()))
 }
 
 fn render_plain_status(entries: &[GdlEntry]) -> String {
@@ -188,6 +248,194 @@ fn render_status(entries: &[GdlEntry], theme: Option<&ColorTheme>) -> String {
     }
 
     output
+}
+
+fn render_diff(diff: &FileDiff, width: usize, theme: Option<&ColorTheme>) -> String {
+    if diff.binary {
+        return format!("Binary file {} changed\n", slash_path(&diff.file));
+    }
+
+    if width >= 120 {
+        render_side_by_side_diff(diff, width, theme)
+    } else {
+        render_unified_diff(diff, theme)
+    }
+}
+
+fn render_unified_diff(diff: &FileDiff, theme: Option<&ColorTheme>) -> String {
+    let mut output = String::new();
+    output.push_str(&format!(
+        "diff --{} {}\n",
+        diff.area,
+        format_diff_path(&diff.file, theme)
+    ));
+    output.push_str(&format!("--- a/{}\n", slash_path(&diff.file)));
+    output.push_str(&format!("+++ b/{}\n", slash_path(&diff.file)));
+
+    for hunk in &diff.hunks {
+        output.push_str(&format_hunk_header(hunk, theme));
+        output.push('\n');
+        for line in &hunk.old_bytes {
+            push_diff_line(
+                &mut output,
+                "-",
+                line,
+                &diff.file,
+                theme.map(|theme| theme.lines_removed),
+                false,
+            );
+        }
+        for line in &hunk.new_bytes {
+            push_diff_line(
+                &mut output,
+                "+",
+                line,
+                &diff.file,
+                theme.map(|theme| theme.lines_added),
+                theme.is_some(),
+            );
+        }
+    }
+
+    output
+}
+
+fn render_side_by_side_diff(diff: &FileDiff, width: usize, theme: Option<&ColorTheme>) -> String {
+    let mut output = String::new();
+    output.push_str(&format!(
+        "diff --{} {}\n",
+        diff.area,
+        format_diff_path(&diff.file, theme)
+    ));
+
+    let column_width = width.saturating_sub(5) / 2;
+    for hunk in &diff.hunks {
+        output.push_str(&format_hunk_header(hunk, theme));
+        output.push('\n');
+
+        let row_count = hunk.old_bytes.len().max(hunk.new_bytes.len());
+        for index in 0..row_count {
+            let old = hunk.old_bytes.get(index);
+            let new = hunk.new_bytes.get(index);
+            let old_cell = side_by_side_cell("-", old, &diff.file, column_width, theme, false);
+            let new_cell = side_by_side_cell("+", new, &diff.file, column_width, theme, true);
+            output.push_str(&old_cell);
+            output.push_str(" | ");
+            output.push_str(&new_cell);
+            output.push('\n');
+        }
+    }
+
+    output
+}
+
+fn side_by_side_cell(
+    gutter: &str,
+    line: Option<&Vec<u8>>,
+    path: &Path,
+    width: usize,
+    theme: Option<&ColorTheme>,
+    highlight: bool,
+) -> String {
+    let Some(line) = line else {
+        return format!("{:<width$}", "");
+    };
+
+    let text = line_to_display(line)
+        .trim_end_matches(['\r', '\n'])
+        .to_owned();
+    let plain = format!("{gutter}{text}");
+    let padded = format!("{plain:<width$}");
+
+    match theme {
+        Some(theme) if highlight => {
+            let gutter = paint(gutter, theme.lines_added);
+            let highlighted = highlight_line(path, &text).unwrap_or(text);
+            let padding = " ".repeat(padded.len().saturating_sub(plain.len()));
+            format!("{gutter}{highlighted}{padding}")
+        }
+        Some(theme) => paint(&padded, theme.lines_removed),
+        None => padded,
+    }
+}
+
+fn format_diff_path(path: &Path, theme: Option<&ColorTheme>) -> String {
+    let path = slash_path(path);
+    match theme {
+        Some(theme) => paint(&path, theme.filename),
+        None => path,
+    }
+}
+
+fn format_hunk_header(hunk: &Hunk, theme: Option<&ColorTheme>) -> String {
+    maybe_paint(
+        format!(
+            "@@ -{} +{} @@",
+            range_text(hunk.old_start, hunk.old_lines),
+            range_text(hunk.new_start, hunk.new_lines)
+        ),
+        theme.map(|theme| theme.hunk_header),
+    )
+}
+
+fn range_text(start: u32, lines: u32) -> String {
+    if lines == 1 {
+        start.to_string()
+    } else {
+        format!("{start},{lines}")
+    }
+}
+
+fn push_diff_line(
+    output: &mut String,
+    gutter: &str,
+    line: &[u8],
+    path: &Path,
+    color: Option<Color>,
+    highlight: bool,
+) {
+    let text = line_to_display(line);
+
+    if highlight {
+        output.push_str(&maybe_paint(gutter.to_owned(), color));
+        output.push_str(&highlight_line(path, &text).unwrap_or(text));
+    } else {
+        output.push_str(&maybe_paint(gutter.to_owned(), color));
+        output.push_str(&maybe_paint(text, color));
+    }
+
+    if !line.ends_with(b"\n") {
+        output.push('\n');
+    }
+}
+
+fn line_to_display(line: &[u8]) -> String {
+    String::from_utf8_lossy(line).into_owned()
+}
+
+fn highlight_line(path: &Path, line: &str) -> Option<String> {
+    let syntax = syntax_set().find_syntax_for_file(path).ok().flatten()?;
+    if syntax.name == "Plain Text" {
+        return None;
+    }
+
+    let theme = syntax_theme()?;
+    let mut highlighter = HighlightLines::new(syntax, theme);
+    let ranges = highlighter.highlight_line(line, syntax_set()).ok()?;
+    Some(as_24_bit_terminal_escaped(&ranges, false))
+}
+
+fn syntax_set() -> &'static SyntaxSet {
+    static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
+    SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
+}
+
+fn syntax_theme() -> Option<&'static Theme> {
+    static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
+    let themes = &THEME_SET.get_or_init(ThemeSet::load_defaults).themes;
+    themes
+        .get("base16-ocean.dark")
+        .or_else(|| themes.values().next())
 }
 
 fn format_section_header(header: &str, theme: Option<&ColorTheme>) -> String {

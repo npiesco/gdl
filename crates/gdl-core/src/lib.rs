@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::error::Error;
 use std::fmt;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -161,6 +161,58 @@ pub struct GdlEntry {
     pub is_binary: bool,
 }
 
+/// Which pair of repository states to diff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DiffArea {
+    /// Worktree bytes compared to the index.
+    Worktree,
+    /// Index bytes compared to `HEAD`.
+    Staged,
+    /// Worktree bytes compared to `HEAD`.
+    Head,
+}
+
+impl fmt::Display for DiffArea {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            DiffArea::Worktree => "worktree",
+            DiffArea::Staged => "staged",
+            DiffArea::Head => "head",
+        })
+    }
+}
+
+/// One raw byte-preserving diff hunk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hunk {
+    /// 1-based start line in the old side, or 0 for a pure addition at file start.
+    pub old_start: u32,
+    /// Number of old-side changed lines.
+    pub old_lines: u32,
+    /// 1-based start line in the new side, or 0 for a pure deletion at file start.
+    pub new_start: u32,
+    /// Number of new-side changed lines.
+    pub new_lines: u32,
+    /// Raw removed line bytes, including original line endings.
+    pub old_bytes: Vec<Vec<u8>>,
+    /// Raw added line bytes, including original line endings.
+    pub new_bytes: Vec<Vec<u8>>,
+}
+
+/// Raw diff data for a single repository-relative file path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileDiff {
+    /// Repository-relative file path.
+    pub file: PathBuf,
+    /// Diff area used to choose old and new bytes.
+    pub area: DiffArea,
+    /// Whether either side is binary. Binary files do not expose text hunks.
+    pub binary: bool,
+    /// Text hunks in gix-diff order.
+    pub hunks: Vec<Hunk>,
+}
+
 /// Errors returned while collecting repository status.
 #[derive(Debug)]
 pub struct StatusError {
@@ -184,6 +236,43 @@ impl fmt::Display for StatusError {
 }
 
 impl Error for StatusError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source
+            .as_deref()
+            .map(|source| source as &(dyn Error + 'static))
+    }
+}
+
+/// Errors returned while collecting a file diff.
+#[derive(Debug)]
+pub struct DiffError {
+    message: String,
+    source: Option<Box<dyn Error + Send + Sync>>,
+}
+
+impl DiffError {
+    fn simple(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    fn with_source(message: impl Into<String>, source: impl Error + Send + Sync + 'static) -> Self {
+        Self {
+            message: message.into(),
+            source: Some(Box::new(source)),
+        }
+    }
+}
+
+impl fmt::Display for DiffError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl Error for DiffError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.source
             .as_deref()
@@ -224,6 +313,29 @@ pub fn status(repo: &Repository) -> Result<Vec<GdlEntry>, StatusError> {
     });
 
     Ok(entries)
+}
+
+/// Returns raw hunks for `path` in the requested diff area.
+pub fn diff(
+    repo: &Repository,
+    path: impl AsRef<Path>,
+    area: DiffArea,
+) -> Result<FileDiff, DiffError> {
+    let file = repo_relative_path(path.as_ref())?;
+    let (old, new) = diff_sides(repo, &file, area)?;
+    let binary = is_binary(&old) || is_binary(&new);
+    let hunks = if binary {
+        Vec::new()
+    } else {
+        diff_hunks(&old, &new)
+    };
+
+    Ok(FileDiff {
+        file,
+        area,
+        binary,
+        hunks,
+    })
 }
 
 fn push_tree_index_entry(
@@ -442,6 +554,114 @@ fn worktree_bytes(repo: &Repository, path: impl AsRef<Path>) -> Result<Vec<u8>, 
         .map_err(|err| StatusError::with_source("failed to read worktree file", err))
 }
 
+fn diff_sides(
+    repo: &Repository,
+    path: &Path,
+    area: DiffArea,
+) -> Result<(Vec<u8>, Vec<u8>), DiffError> {
+    match area {
+        DiffArea::Worktree => Ok((
+            index_blob_bytes(repo, path)?.unwrap_or_default(),
+            worktree_bytes_optional(repo, path)?.unwrap_or_default(),
+        )),
+        DiffArea::Staged => Ok((
+            head_blob_bytes(repo, path)?.unwrap_or_default(),
+            index_blob_bytes(repo, path)?.unwrap_or_default(),
+        )),
+        DiffArea::Head => Ok((
+            head_blob_bytes(repo, path)?.unwrap_or_default(),
+            worktree_bytes_optional(repo, path)?.unwrap_or_default(),
+        )),
+    }
+}
+
+fn diff_hunks(old: &[u8], new: &[u8]) -> Vec<Hunk> {
+    let old_lines = gix_diff::blob::sources::byte_lines(old).collect::<Vec<_>>();
+    let new_lines = gix_diff::blob::sources::byte_lines(new).collect::<Vec<_>>();
+    let input = gix_diff::blob::InternedInput::new(
+        gix_diff::blob::sources::byte_lines(old),
+        gix_diff::blob::sources::byte_lines(new),
+    );
+    let diff =
+        gix_diff::blob::diff_with_slider_heuristics(gix_diff::blob::Algorithm::Histogram, &input);
+
+    diff.hunks()
+        .map(|hunk| Hunk {
+            old_start: range_start(hunk.before.start, hunk.before.end),
+            old_lines: hunk.before.end - hunk.before.start,
+            new_start: range_start(hunk.after.start, hunk.after.end),
+            new_lines: hunk.after.end - hunk.after.start,
+            old_bytes: old_lines[hunk.before.start as usize..hunk.before.end as usize]
+                .iter()
+                .map(|line| line.to_vec())
+                .collect(),
+            new_bytes: new_lines[hunk.after.start as usize..hunk.after.end as usize]
+                .iter()
+                .map(|line| line.to_vec())
+                .collect(),
+        })
+        .collect()
+}
+
+fn range_start(start: u32, end: u32) -> u32 {
+    if start == 0 && end == 0 {
+        0
+    } else {
+        start + 1
+    }
+}
+
+fn head_blob_bytes(repo: &Repository, path: &Path) -> Result<Option<Vec<u8>>, DiffError> {
+    let tree_id = repo
+        .inner()
+        .head_tree_id_or_empty()
+        .map_err(|err| DiffError::with_source("failed to resolve HEAD tree", err))?;
+    let mut tree = repo
+        .inner()
+        .find_tree(tree_id)
+        .map_err(|err| DiffError::with_source("failed to read HEAD tree", err))?;
+    let Some(entry) = tree
+        .peel_to_entry_by_path(path)
+        .map_err(|err| DiffError::with_source("failed to look up path in HEAD", err))?
+    else {
+        return Ok(None);
+    };
+
+    diff_blob_bytes(repo, entry.object_id()).map(Some)
+}
+
+fn index_blob_bytes(repo: &Repository, path: &Path) -> Result<Option<Vec<u8>>, DiffError> {
+    if !repo.inner().index_path().exists() {
+        return Ok(None);
+    }
+
+    let index = repo
+        .inner()
+        .open_index()
+        .map_err(|err| DiffError::with_source("failed to open index", err))?;
+    let path = slash_path(path);
+    let Some(entry) = index.entry_by_path(gix::bstr::ByteSlice::as_bstr(path.as_bytes())) else {
+        return Ok(None);
+    };
+
+    diff_blob_bytes(repo, entry.id).map(Some)
+}
+
+fn worktree_bytes_optional(repo: &Repository, path: &Path) -> Result<Option<Vec<u8>>, DiffError> {
+    match fs::read(repo.worktree_dir().join(path)) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(DiffError::with_source("failed to read worktree file", err)),
+    }
+}
+
+fn diff_blob_bytes(repo: &Repository, id: gix::ObjectId) -> Result<Vec<u8>, DiffError> {
+    repo.inner()
+        .find_blob(id)
+        .map(|blob| blob.data.clone())
+        .map_err(|err| DiffError::with_source("failed to read blob", err))
+}
+
 fn diff_counts(old: &[u8], new: &[u8]) -> (usize, usize, bool) {
     let is_binary = is_binary(old) || is_binary(new);
     if is_binary {
@@ -500,6 +720,39 @@ fn lcs_len(left: &[&[u8]], right: &[&[u8]]) -> usize {
 
 fn path_from_bstr(bytes: impl AsRef<[u8]>) -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(bytes.as_ref()).into_owned())
+}
+
+fn repo_relative_path(path: &Path) -> Result<PathBuf, DiffError> {
+    if path.as_os_str().is_empty() {
+        return Err(DiffError::simple("diff path must not be empty"));
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(DiffError::simple(format!(
+                    "diff path must be repository-relative: {}",
+                    path.display()
+                )));
+            }
+        }
+    }
+
+    if normalized.as_os_str().is_empty() {
+        return Err(DiffError::simple("diff path must not be empty"));
+    }
+
+    Ok(normalized)
+}
+
+fn slash_path(path: &Path) -> String {
+    path.iter()
+        .map(|component| component.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn section_order(section: ChangeSection) -> u8 {

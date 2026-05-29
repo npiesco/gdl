@@ -1,4 +1,5 @@
-use gdl_format::{ColorPolicy, OutputFormat, RenderOptions, StatusView};
+use gdl_core::DiffArea;
+use gdl_format::{diff_to_string, ColorPolicy, OutputFormat, RenderOptions, StatusView};
 use gdl_testkit::TestRepo;
 
 #[test]
@@ -95,6 +96,54 @@ fn status_plain_renders_conflicted_section() -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
+#[test]
+fn diff_plain_renders_unified_text() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = diff_fixture();
+    let repo = gdl_core::open(fixture.path())?;
+
+    let output = diff_to_string(
+        &repo,
+        "src/app.rs",
+        &plain_diff_options(80),
+        DiffArea::Worktree,
+    )?;
+
+    assert_eq!(
+        output,
+        concat!(
+            "diff --worktree src/app.rs\n",
+            "--- a/src/app.rs\n",
+            "+++ b/src/app.rs\n",
+            "@@ -2 +2 @@\n",
+            "-    let value = \"old\"; // before\n",
+            "+    let value = \"new\"; // after\n",
+        )
+    );
+
+    Ok(())
+}
+
+#[test]
+fn diff_plain_renders_binary_marker() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = TestRepo::init();
+    fixture.write("bin.dat", b"old\0bytes");
+    fixture.git(["add", "."]);
+    fixture.git(["commit", "-m", "initial"]);
+    fixture.write("bin.dat", b"new\0bytes");
+
+    let repo = gdl_core::open(fixture.path())?;
+    let output = diff_to_string(
+        &repo,
+        "bin.dat",
+        &plain_diff_options(80),
+        DiffArea::Worktree,
+    )?;
+
+    assert_eq!(output, "Binary file bin.dat changed\n");
+
+    Ok(())
+}
+
 fn status_fixture<const N: usize>(mutation_order: [&str; N]) -> TestRepo {
     let fixture = TestRepo::init();
     fixture.write("nested/modified.txt", "base\n");
@@ -119,4 +168,39 @@ fn status_fixture<const N: usize>(mutation_order: [&str; N]) -> TestRepo {
     fixture.git(["mv", "old-name.txt", "renamed.txt"]);
 
     fixture
+}
+
+fn diff_fixture() -> TestRepo {
+    let fixture = TestRepo::init();
+    fixture.write(
+        "src/app.rs",
+        concat!(
+            "fn main() {\n",
+            "    let value = \"old\"; // before\n",
+            "    println!(\"{value}\");\n",
+            "}\n",
+        ),
+    );
+    fixture.git(["add", "."]);
+    fixture.git(["commit", "-m", "initial"]);
+    fixture.write(
+        "src/app.rs",
+        concat!(
+            "fn main() {\n",
+            "    let value = \"new\"; // after\n",
+            "    println!(\"{value}\");\n",
+            "}\n",
+        ),
+    );
+
+    fixture
+}
+
+fn plain_diff_options(width: usize) -> RenderOptions {
+    RenderOptions {
+        format: OutputFormat::Plain,
+        color: ColorPolicy::Never,
+        width,
+        view: StatusView::Full,
+    }
 }

@@ -63,6 +63,28 @@ fn status_json_matches_formatter_bytes() -> Result<(), Box<dyn std::error::Error
     )
 }
 
+#[test]
+fn no_subcommand_defaults_to_status_byte_for_byte() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = status_fixture();
+
+    let default_output = Command::cargo_bin("gdl")?
+        .arg("--repo")
+        .arg(fixture.path())
+        .output()?;
+    let status_output = Command::cargo_bin("gdl")?
+        .arg("--repo")
+        .arg(fixture.path())
+        .arg("status")
+        .output()?;
+
+    assert!(default_output.status.success());
+    assert!(status_output.status.success());
+    assert_eq!(default_output.stdout, status_output.stdout);
+    assert_eq!(default_output.stderr, status_output.stderr);
+
+    Ok(())
+}
+
 fn assert_status_matches<const N: usize>(
     args: [&str; N],
     options: RenderOptions,

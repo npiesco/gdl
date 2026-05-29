@@ -1,8 +1,14 @@
 use crossterm::style::SetForegroundColor;
+use gdl_core::DiffArea;
 use gdl_format::{
-    status_to_string, ColorPolicy, ColorTheme, OutputFormat, RenderOptions, StatusView,
+    diff_to_string, status_to_string, ColorPolicy, ColorTheme, OutputFormat, RenderOptions,
+    StatusView,
 };
 use gdl_testkit::TestRepo;
+use syntect::{
+    easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet,
+    util::as_24_bit_terminal_escaped,
+};
 
 #[test]
 fn status_ansi_strips_to_plain_and_colors_status_badges() -> Result<(), Box<dyn std::error::Error>>
@@ -102,6 +108,94 @@ fn status_ansi_ignores_no_color_environment() -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
+#[test]
+fn diff_ansi_strips_to_plain_and_runs_syntect() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = diff_fixture("src/app.rs");
+    let repo = gdl_core::open(fixture.path())?;
+
+    let plain = diff_to_string(
+        &repo,
+        "src/app.rs",
+        &plain_diff_options(80),
+        DiffArea::Worktree,
+    )?;
+    let ansi = diff_to_string(
+        &repo,
+        "src/app.rs",
+        &ansi_diff_options(80),
+        DiffArea::Worktree,
+    )?;
+
+    assert_eq!(strip_ansi_escapes::strip(ansi.as_bytes()), plain.as_bytes());
+    assert!(ansi.contains(&syntect_oracle_line("src/app.rs")?));
+
+    Ok(())
+}
+
+#[test]
+fn diff_ansi_plain_text_fallback_keeps_only_gutter_color() -> Result<(), Box<dyn std::error::Error>>
+{
+    let fixture = diff_fixture("notes.txt");
+    let repo = gdl_core::open(fixture.path())?;
+
+    let ansi = diff_to_string(
+        &repo,
+        "notes.txt",
+        &ansi_diff_options(80),
+        DiffArea::Worktree,
+    )?;
+
+    assert!(!ansi.contains("\x1b[38;2;"));
+    assert!(ansi.contains(&SetForegroundColor(ColorTheme::default().lines_added).to_string()));
+
+    Ok(())
+}
+
+#[test]
+fn diff_ansi_uses_width_driven_layout() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = diff_fixture("src/app.rs");
+    let repo = gdl_core::open(fixture.path())?;
+
+    let narrow_plain = diff_to_string(
+        &repo,
+        "src/app.rs",
+        &plain_diff_options(60),
+        DiffArea::Worktree,
+    )?;
+    let narrow_ansi = diff_to_string(
+        &repo,
+        "src/app.rs",
+        &ansi_diff_options(60),
+        DiffArea::Worktree,
+    )?;
+    let wide_plain = diff_to_string(
+        &repo,
+        "src/app.rs",
+        &plain_diff_options(200),
+        DiffArea::Worktree,
+    )?;
+    let wide_ansi = diff_to_string(
+        &repo,
+        "src/app.rs",
+        &ansi_diff_options(200),
+        DiffArea::Worktree,
+    )?;
+
+    assert_ne!(narrow_plain, wide_plain);
+    assert!(narrow_plain.contains("--- a/src/app.rs"));
+    assert!(wide_plain.contains(" | "));
+    assert_eq!(
+        strip_ansi_escapes::strip(narrow_ansi.as_bytes()),
+        narrow_plain.as_bytes()
+    );
+    assert_eq!(
+        strip_ansi_escapes::strip(wide_ansi.as_bytes()),
+        wide_plain.as_bytes()
+    );
+
+    Ok(())
+}
+
 fn assert_token_color(output: &str, token: &str, expected_color: SetForegroundColor) {
     let token_index = output
         .find(token)
@@ -173,6 +267,24 @@ fn plain_options() -> RenderOptions {
     }
 }
 
+fn ansi_diff_options(width: usize) -> RenderOptions {
+    RenderOptions {
+        format: OutputFormat::Ansi,
+        color: ColorPolicy::Always,
+        width,
+        view: StatusView::Full,
+    }
+}
+
+fn plain_diff_options(width: usize) -> RenderOptions {
+    RenderOptions {
+        format: OutputFormat::Plain,
+        color: ColorPolicy::Never,
+        width,
+        view: StatusView::Full,
+    }
+}
+
 fn status_fixture<const N: usize>(mutation_order: [&str; N]) -> TestRepo {
     let fixture = TestRepo::init();
     fixture.write("nested/modified.txt", "base\n");
@@ -197,6 +309,33 @@ fn status_fixture<const N: usize>(mutation_order: [&str; N]) -> TestRepo {
     fixture.git(["mv", "old-name.txt", "renamed.txt"]);
 
     fixture
+}
+
+fn diff_fixture(path: &str) -> TestRepo {
+    let fixture = TestRepo::init();
+    fixture.write(path, "fn original() { let text = \"before\"; // old\n");
+    fixture.git(["add", "."]);
+    fixture.git(["commit", "-m", "initial"]);
+    fixture.write(path, "fn changed() { let text = \"after\"; // new\n");
+
+    fixture
+}
+
+fn syntect_oracle_line(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let syntax_set = SyntaxSet::load_defaults_newlines();
+    let syntax = syntax_set
+        .find_syntax_for_file(path)?
+        .expect("Rust syntax must be detected");
+    let theme_set = ThemeSet::load_defaults();
+    let theme = theme_set
+        .themes
+        .get("base16-ocean.dark")
+        .expect("base16-ocean.dark theme must exist");
+    let mut highlighter = HighlightLines::new(syntax, theme);
+    let ranges =
+        highlighter.highlight_line("fn changed() { let text = \"after\"; // new\n", &syntax_set)?;
+
+    Ok(as_24_bit_terminal_escaped(&ranges, false))
 }
 
 fn conflicted_fixture() -> TestRepo {
