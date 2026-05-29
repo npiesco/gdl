@@ -8,6 +8,9 @@ repository.workspace = true
 authors.workspace = true
 description = "Pure rendering helpers for gdl (status/diff to_string in Plain/Json/Ansi)"
 
+[dependencies]
+gdl-core = { path = "../gdl-core" }
+
 [lints]
 workspace = true
 
