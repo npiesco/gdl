@@ -16,4 +16,11 @@ path = "src/main.rs"
 workspace = true
 
 [dev-dependencies]
+assert_cmd = "2.2.2"
 gdl-testkit = { path = "../gdl-testkit" }
+
+[dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
+crossterm = "0.29.0"
+gdl-core = { version = "0.1.0", path = "../gdl-core" }
+gdl-format = { version = "0.1.0", path = "../gdl-format" }

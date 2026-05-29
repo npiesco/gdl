@@ -1,3 +1,8 @@
-//! gdl CLI entrypoint. Skeleton only — subcommand wiring lands in Feature 8+.
+//! gdl CLI entrypoint.
 
-fn main() {}
+use clap::Parser;
+
+fn main() {
+    let cli = gdl_cli::Cli::parse();
+    std::process::exit(gdl_cli::run(cli));
+}
