@@ -16,4 +16,13 @@ path = "src/main.rs"
 workspace = true
 
 [dev-dependencies]
+assert_cmd = "2.2.2"
 gdl-testkit = { path = "../gdl-testkit" }
+serde_json = "1.0.150"
+
+[dependencies]
+gdl-core = { version = "0.1.0", path = "../gdl-core" }
+gdl-format = { version = "0.1.0", path = "../gdl-format" }
+rmcp = { version = "1.7.0", features = ["transport-io"] }
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
