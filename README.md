@@ -199,6 +199,9 @@ Or via Claude Code:
 claude mcp add --scope user gdl /path/to/gdl/target/release/gdl-mcp
 ```
 
+The repo also includes a Copilot MCP config fragment at
+[`examples/copilot-mcp-gdl.json`](examples/copilot-mcp-gdl.json).
+
 ### Tools
 
 | Tool | Description |
@@ -231,6 +234,9 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 make release
 ```
+
+Release verification is tracked in
+[`docs/release-smoke.md`](docs/release-smoke.md).
 
 ---
 

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "gdl": {
+      "type": "stdio",
+      "command": "/home/npiesco/gdl/target/release/gdl-mcp",
+      "args": []
+    }
+  }
+}
