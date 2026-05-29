@@ -9,6 +9,7 @@ authors.workspace = true
 description = "Pure rendering helpers for gdl (status/diff to_string in Plain/Json/Ansi)"
 
 [dependencies]
+crossterm = "0.29.0"
 gdl-core = { path = "../gdl-core" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
@@ -18,3 +19,4 @@ workspace = true
 
 [dev-dependencies]
 gdl-testkit = { path = "../gdl-testkit" }
+strip-ansi-escapes = "0.2.1"
