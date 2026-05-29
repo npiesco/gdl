@@ -6,6 +6,8 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 /// Returns the `gdl-core` package version.
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
@@ -107,7 +109,7 @@ impl Repository {
 
 /// Logical status section for an entry, matching the VS Code Source Control
 /// grouping model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChangeSection {
     /// Changes staged in the index relative to `HEAD`.
     Staged,
@@ -120,7 +122,7 @@ pub enum ChangeSection {
 }
 
 /// Git change kind normalized for gdl renderers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChangeKind {
     /// Existing path contents changed.
     Modified,
@@ -141,7 +143,7 @@ pub enum ChangeKind {
 }
 
 /// One normalized git status entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GdlEntry {
     /// Which Source Control section owns this entry.
     pub section: ChangeSection,

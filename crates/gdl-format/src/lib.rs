@@ -3,12 +3,15 @@
 use std::path::Path;
 
 use gdl_core::{ChangeKind, ChangeSection, GdlEntry, Repository};
+use serde::{Deserialize, Serialize};
 
 /// Output encoding for format renderers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
     /// Deterministic plain text without ANSI escapes.
     Plain,
+    /// Stable JSON for tools and agent consumers.
+    Json,
 }
 
 /// ANSI color policy for renderers that support color.
@@ -38,15 +41,34 @@ pub struct RenderOptions {
     pub view: StatusView,
 }
 
+/// Stable top-level JSON shape for status output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusOutput {
+    /// Schema version, tied to the `gdl-core` package version.
+    pub version: String,
+    /// Status entries in core status order.
+    pub entries: Vec<GdlEntry>,
+}
+
 /// Renders repository status as a deterministic string.
 pub fn status_to_string(repo: &Repository, options: &RenderOptions) -> Result<String, String> {
-    match (options.format, options.color, options.view) {
-        (OutputFormat::Plain, ColorPolicy::Never, StatusView::Full) => {}
-    }
     let _width = options.width;
 
     let entries = gdl_core::status(repo).map_err(|err| err.to_string())?;
-    Ok(render_plain_status(&entries))
+    match (options.format, options.color, options.view) {
+        (OutputFormat::Plain, ColorPolicy::Never, StatusView::Full) => {
+            Ok(render_plain_status(&entries))
+        }
+        (OutputFormat::Json, ColorPolicy::Never, StatusView::Full) => render_json_status(entries),
+    }
+}
+
+fn render_json_status(entries: Vec<GdlEntry>) -> Result<String, String> {
+    let output = StatusOutput {
+        version: gdl_core::version().to_owned(),
+        entries,
+    };
+    serde_json::to_string_pretty(&output).map_err(|err| err.to_string())
 }
 
 fn render_plain_status(entries: &[GdlEntry]) -> String {
