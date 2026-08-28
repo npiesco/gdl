@@ -1,7 +1,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -99,10 +99,11 @@ impl McpProcess {
 
     fn response(&self, id: u64) -> Value {
         for _ in 0..20 {
-            let line = self
-                .stdout_rx
-                .recv_timeout(Duration::from_millis(250))
-                .expect("gdl-mcp must respond");
+            let line = match self.stdout_rx.recv_timeout(Duration::from_millis(250)) {
+                Ok(line) => line,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => panic!("gdl-mcp stdout disconnected"),
+            };
             let value: Value = serde_json::from_str(&line).expect("stdout must be JSON-RPC");
             if value.get("id").and_then(Value::as_u64) == Some(id) {
                 return value;
