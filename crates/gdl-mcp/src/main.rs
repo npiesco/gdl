@@ -7,7 +7,8 @@ use gdl_format::{ColorPolicy, OutputFormat, RenderOptions, StatusView};
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
-        CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
+        CallToolResult, ContentBlock, Implementation, ProtocolVersion, ServerCapabilities,
+        ServerInfo,
     },
     schemars, tool, tool_handler, tool_router,
     transport::stdio,
@@ -178,11 +179,11 @@ impl DiffParams {
 }
 
 fn tool_success(content: String) -> CallToolResult {
-    CallToolResult::success(vec![Content::text(content)])
+    CallToolResult::success(vec![ContentBlock::text(content)])
 }
 
 fn tool_error(message: String) -> CallToolResult {
-    CallToolResult::error(vec![Content::text(message)])
+    CallToolResult::error(vec![ContentBlock::text(message)])
 }
 
 #[tool_router]
